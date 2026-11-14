@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { ethers } = require("hardhat");
+require("dotenv").config({ path: path.join(__dirname, "..", "backend", ".env") });
 
 function makePdf(label) {
   const text = label.replace(/[()\\]/g, "");
@@ -32,7 +33,13 @@ async function main() {
   if (!registryAddress || !workflowAddress) {
     throw new Error("Set REGISTRY_ADDRESS and WORKFLOW_ADDRESS before running the demo seeder.");
   }
+  if (!process.env.PINATA_JWT) {
+    throw new Error("Set PINATA_JWT in backend/.env before uploading demo documents.");
+  }
   const [, issuer, recipient] = await ethers.getSigners();
+  if (!issuer || !recipient) {
+    throw new Error("The demo seeder needs separate issuer and recipient accounts; use a local Hardhat network.");
+  }
   const registry = await ethers.getContractAt("InvoiceRegistry", registryAddress, issuer);
   const workflow = await ethers.getContractAt("InvoiceWorkflow", workflowAddress);
   if ((await registry.invoiceCount()) !== 0n) {
@@ -47,6 +54,7 @@ async function main() {
     const filePath = path.join(documentsDirectory, `invoice-${String(index).padStart(3, "0")}.pdf`);
     fs.writeFileSync(filePath, pdf);
     samples.push({
+      pdf,
       hash: `0x${crypto.createHash("sha256").update(pdf).digest("hex")}`
     });
   }
@@ -55,6 +63,13 @@ async function main() {
     makePdf("DEMO INVOICE 001 ALTERED")
   );
 
+  const { uploadInvoiceToPinata } = await import("../backend/src/pinata.js");
+  for (const [index, sample] of samples.entries()) {
+    const upload = await uploadInvoiceToPinata(sample.pdf, sample.hash, process.env.PINATA_JWT);
+    sample.metadataURI = upload.metadataURI;
+    console.log(`Uploaded invoice ${index + 1}: ${upload.documentURI} (metadata: ${upload.metadataURI})`);
+  }
+
   const ids = [];
   for (let index = 0; index < samples.length; index += 1) {
     const tx = await registry.registerInvoice(
@@ -62,7 +77,7 @@ async function main() {
       samples[index].hash,
       (index + 1) * 12500,
       "EUR",
-      ""
+      samples[index].metadataURI
     );
     await tx.wait();
     ids.push(await registry.invoiceCount());
@@ -81,6 +96,7 @@ async function main() {
   console.log(`Issuer/business: ${issuer.address}`);
   console.log(`Recipient/client: ${recipient.address}`);
   console.log(`Documents: ${documentsDirectory}`);
+  console.log("Demo flows: invoice #1 sent, accepted, and paid; invoice #2 sent and disputed; invoice #3 sent and accepted.");
   console.log("Verify invoice #1 with invoice-001.pdf (match), invoice-001-altered.pdf (mismatch),");
   console.log("and invoice #3 with invoice-003.pdf (match).");
 }

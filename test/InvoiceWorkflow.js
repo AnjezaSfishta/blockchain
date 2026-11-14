@@ -240,4 +240,31 @@ describe("InvoiceRegistry and InvoiceWorkflow", function () {
     await expect(workflow.connect(issuer).sendInvoice(99)).to.be.revertedWith("Workflow: invoice not found");
   });
 
+  it("33. allows an unrelated wallet to register its own invoice", async function () {
+    const id = await createInvoice(outsider, recipient.address);
+    const invoice = await registry.getInvoice(id);
+
+    expect(invoice.issuer).to.equal(outsider.address);
+    expect(invoice.recipient).to.equal(recipient.address);
+    expect(await workflow.statusOf(id)).to.equal(0);
+  });
+
+  it("34. rejects currency longer than 12 characters", async function () {
+    await expect(
+      registry.connect(issuer).registerInvoice(
+        recipient.address, hash, 1, "TOO-LONG-CURRENCY", metadata
+      )
+    ).to.be.revertedWith("Registry: invalid currency");
+  });
+
+  it("35. rejects metadata URI longer than 256 characters", async function () {
+    const longMetadata = "a".repeat(257);
+
+    await expect(
+      registry.connect(issuer).registerInvoice(
+        recipient.address, hash, 1, currency, longMetadata
+      )
+    ).to.be.revertedWith("Registry: metadata URI too long");
+  });
+
 });

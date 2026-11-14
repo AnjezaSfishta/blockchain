@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserProvider, Contract, JsonRpcProvider, formatUnits, isAddress, parseUnits } from "ethers";
 import {
   registryAbi,
@@ -11,11 +11,32 @@ import {
 
 type View = "overview" | "register" | "details" | "actions" | "verify";
 type ApiEvent = { invoiceId: string; status?: number; note?: string; changedBy?: string; changedAt?: number; blockNumber?: number };
+type VerificationRecord = {
+  invoiceId: string;
+  wallet: string;
+  pdfHash: string;
+  result: "Valid" | "Invalid";
+  verifiedAt: string;
+  blockchainHash: string;
+};
+
+function isVerificationRecord(value: unknown): value is VerificationRecord {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.invoiceId === "string"
+    && typeof record.wallet === "string"
+    && typeof record.pdfHash === "string"
+    && (record.result === "Valid" || record.result === "Invalid")
+    && typeof record.verifiedAt === "string"
+    && typeof record.blockchainHash === "string";
+}
+
 const apiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, "");
 const registryAddress = import.meta.env.VITE_REGISTRY_ADDRESS;
 const workflowAddress = import.meta.env.VITE_WORKFLOW_ADDRESS;
 const rpcUrl = import.meta.env.VITE_RPC_URL || "http://127.0.0.1:8545";
 const configuredChainId = Number(import.meta.env.VITE_CHAIN_ID || "31337");
+const verificationHistoryKey = "fatura.verification-history";
 
 function shortAddress(value: string) {
   return `${value.slice(0, 6)}…${value.slice(-4)}`;
@@ -52,17 +73,47 @@ export default function App() {
   const [error, setError] = useState("");
   const [verifyResult, setVerifyResult] = useState<"match" | "mismatch" | "">("");
   const [verifyFile, setVerifyFile] = useState<File>();
+  const [verificationHistory, setVerificationHistory] = useState<VerificationRecord[]>([]);
+  const registerFormRef = useRef<HTMLFormElement>(null);
+  const verifyFormRef = useRef<HTMLFormElement>(null);
   const [form, setForm] = useState({
     recipient: "",
     amount: "",
     currency: "EUR",
-    metadataURI: "",
     file: undefined as File | undefined
   });
   const [actionNote, setActionNote] = useState("");
 
+  useEffect(() => {
+    try {
+      const savedHistory = localStorage.getItem(verificationHistoryKey);
+      if (savedHistory) {
+        const parsedHistory: unknown = JSON.parse(savedHistory);
+        if (!Array.isArray(parsedHistory) || !parsedHistory.every(isVerificationRecord)) {
+          throw new Error("Formati i historikut është i pavlefshëm.");
+        }
+        setVerificationHistory(parsedHistory);
+      }
+    } catch (historyError) {
+      setError(`Historiku i verifikimeve nuk u lexua: ${readableError(historyError)}`);
+    }
+  }, []);
+
   const connected = Boolean(account);
   const selectedInvoice = invoices.find((invoice) => invoice.id === selectedId);
+  const canDispute = Boolean(
+    selectedInvoice
+    && selectedInvoice.status === 1
+    && accountMatches(selectedInvoice.recipient, account)
+  );
+  const canCancel = Boolean(
+    selectedInvoice
+    && [0, 1, 3].includes(selectedInvoice.status)
+    && (
+      accountMatches(selectedInvoice.issuer, account)
+      || accountMatches(selectedInvoice.recipient, account)
+    )
+  );
   const statusCounts = useMemo(() => invoices.reduce<Record<number, number>>((counts, invoice) => {
     counts[invoice.status] = (counts[invoice.status] ?? 0) + 1;
     return counts;
@@ -127,8 +178,16 @@ export default function App() {
 
   useEffect(() => {
     if (!window.ethereum) return;
-    const accountChanged = (...accounts: unknown[]) => setAccount(String((accounts[0] as string[] | undefined)?.[0] ?? ""));
-    const chainChanged = (chain: unknown) => setChainId(BigInt(String(chain)));
+    const accountChanged = (...accounts: unknown[]) => {
+      setAccount(String((accounts[0] as string[] | undefined)?.[0] ?? ""));
+      setNotice("");
+      setError("");
+    };
+    const chainChanged = (chain: unknown) => {
+      setChainId(BigInt(String(chain)));
+      setNotice("");
+      setError("");
+    };
     window.ethereum.on("accountsChanged", accountChanged);
     window.ethereum.on("chainChanged", chainChanged);
     return () => {
@@ -139,6 +198,7 @@ export default function App() {
 
   const connectWallet = async () => {
     setError("");
+    setNotice("");
     try {
       const provider = await wallet();
       const accounts = await provider.send("eth_requestAccounts", []) as string[];
@@ -179,18 +239,36 @@ export default function App() {
       setError("Plotëso adresën e vlefshme të klientit, shumën dhe PDF-në.");
       return;
     }
-    await withTransaction("Fatura u regjistrua në blockchain.", async ({ registry }) => {
+    if (form.file.size > 10 * 1024 * 1024) {
+      setError("PDF-ja duhet të jetë më e vogël se 10 MB.");
+      return;
+    }
+    await withTransaction("Fatura dhe metadata u ruajtën në IPFS; hash-i dhe URI u regjistruan në blockchain.", async ({ registry }) => {
+      if (!apiUrl) throw new Error("Konfiguro VITE_API_URL për të ngarkuar dokumentin në IPFS.");
       const documentHash = await hashFile(form.file!);
+      const uploadResponse = await fetch(`${apiUrl}/api/storage`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/pdf",
+          "X-Document-Hash": documentHash
+        },
+        body: form.file!
+      });
+      const uploadResult = await uploadResponse.json() as { error?: string; metadataURI?: string };
+      if (!uploadResponse.ok || !uploadResult.metadataURI) {
+        throw new Error(uploadResult.error || `Ngarkimi në IPFS dështoi (${uploadResponse.status}).`);
+      }
       const amount = parseUnits(form.amount, 2);
       const tx = await registry.getFunction("registerInvoice")(
         form.recipient,
         documentHash,
         amount,
         form.currency,
-        form.metadataURI
+        uploadResult.metadataURI
       );
       await tx.wait();
-      setForm({ recipient: "", amount: "", currency: "EUR", metadataURI: "", file: undefined });
+      setForm({ recipient: "", amount: "", currency: "EUR", file: undefined });
+      registerFormRef.current?.reset();
     });
   };
 
@@ -214,7 +292,7 @@ export default function App() {
 
   const loadDetails = async (id: bigint) => {
     setSelectedId(id);
-    setView("details");
+    navigateToView("details");
     setError("");
     try {
       if (!workflowAddress) return;
@@ -233,11 +311,47 @@ export default function App() {
       return;
     }
     setError("");
+    let pdfHash: string;
     try {
-      setVerifyResult(await hashFile(verifyFile) === selectedInvoice.documentHash ? "match" : "mismatch");
+      pdfHash = await hashFile(verifyFile);
     } catch (verifyError) {
       setError(`Dokumenti nuk mund të lexohet: ${readableError(verifyError)}`);
+      return;
     }
+    const result = pdfHash === selectedInvoice.documentHash ? "match" : "mismatch";
+    const record: VerificationRecord = {
+      invoiceId: selectedInvoice.id.toString(),
+      wallet: account || "Pa wallet të lidhur",
+      pdfHash,
+      result: result === "match" ? "Valid" : "Invalid",
+      verifiedAt: new Date().toISOString(),
+      blockchainHash: selectedInvoice.documentHash
+    };
+    setVerifyResult(result);
+    try {
+      const updatedHistory = [record, ...verificationHistory];
+      localStorage.setItem(verificationHistoryKey, JSON.stringify(updatedHistory));
+      setVerificationHistory(updatedHistory);
+    } catch (historyError) {
+      setError(`Historiku i verifikimeve nuk u ruajt: ${readableError(historyError)}`);
+    }
+  };
+
+  const navigateToView = (nextView: View) => {
+    if (view === nextView) return;
+    setNotice("");
+    setError("");
+    if (view === "register") {
+      setForm({ recipient: "", amount: "", currency: "EUR", file: undefined });
+      registerFormRef.current?.reset();
+    }
+    if (view === "verify") {
+      setVerifyFile(undefined);
+      setVerifyResult("");
+      verifyFormRef.current?.reset();
+    }
+    if (view === "actions") setActionNote("");
+    setView(nextView);
   };
 
   const wrongChain = connected && chainId !== undefined && Number(chainId) !== configuredChainId;
@@ -245,14 +359,14 @@ export default function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <a className="brand" href="#" onClick={() => setView("overview")}><span className="brand-mark">F</span><span>fatura<span className="brand-dot">.</span></span></a>
+        <a className="brand" href="#" onClick={(event) => { event.preventDefault(); navigateToView("overview"); }}><span className="brand-mark">F</span><span>Fatura<span className="brand-dot"></span></span></a>
         <div className="side-label">MENAXHIMI</div>
         <nav className="navigation" aria-label="Navigimi kryesor">
-          <NavButton active={view === "overview"} onClick={() => setView("overview")} icon="▦">Pasqyra</NavButton>
-          <NavButton active={view === "register"} onClick={() => setView("register")} icon="+">Regjistro faturë</NavButton>
-          <NavButton active={view === "details"} onClick={() => setView("details")} icon="◷">Historia</NavButton>
-          <NavButton active={view === "actions"} onClick={() => setView("actions")} icon="⇄">Veprimet</NavButton>
-          <NavButton active={view === "verify"} onClick={() => setView("verify")} icon="✓">Verifiko PDF</NavButton>
+          <NavButton active={view === "overview"} onClick={() => navigateToView("overview")} icon="▦">Pasqyra</NavButton>
+          <NavButton active={view === "register"} onClick={() => navigateToView("register")} icon="+">Regjistro faturë</NavButton>
+          <NavButton active={view === "details"} onClick={() => navigateToView("details")} icon="◷">Historia</NavButton>
+          <NavButton active={view === "actions"} onClick={() => navigateToView("actions")} icon="⇄">Veprimet</NavButton>
+          <NavButton active={view === "verify"} onClick={() => navigateToView("verify")} icon="✓">Verifiko PDF</NavButton>
         </nav>
         <div className="sidebar-bottom">
           <div className="network-indicator"><span className="pulse" /> Rrjet testues</div>
@@ -279,7 +393,7 @@ export default function App() {
         {view === "overview" && <section>
           <div className="welcome-row">
             <div><h2>Faturat e ekipit</h2><p>Gjurmim i verifikueshëm, nga regjistrimi deri te pagesa.</p></div>
-            <button className="primary-button" onClick={() => setView("register")}><span>+</span> Regjistro faturë</button>
+            {/* <button className="primary-button" onClick={() => navigateToView("register")}><span>+</span> Regjistro faturë</button> */}
           </div>
           <div className="stats-grid">
             <Stat label="Gjithsej fatura" value={invoices.length} icon="▤" tone="blue" />
@@ -298,15 +412,15 @@ export default function App() {
 
         {view === "register" && <section className="form-page">
           <div className="intro-card"><div className="intro-icon">↗</div><div><h2>Krijo një faturë të verifikueshme</h2><p>PDF-ja nuk ngarkohet në blockchain. Aplikacioni llogarit SHA-256 në pajisjen tënde dhe publikon vetëm hash-in.</p></div></div>
-          <form className="panel invoice-form" onSubmit={registerInvoice}>
+          <form ref={registerFormRef} className="panel invoice-form" onSubmit={registerInvoice}>
             <div className="form-grid">
               <label>Adresa e klientit<input value={form.recipient} onChange={(event) => setForm({ ...form, recipient: event.target.value })} placeholder="0x…" required /></label>
               <label>Shuma<input type="number" min="0.01" step="0.01" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} placeholder="125.00" required /></label>
               <label>Monedha<select value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })}><option>EUR</option><option>USD</option><option>ALL</option></select></label>
-              <label>URI e metadata (opsionale)<input value={form.metadataURI} onChange={(event) => setForm({ ...form, metadataURI: event.target.value })} placeholder="ipfs://…" maxLength={256} /></label>
             </div>
-            <label className="file-drop"><span className="upload-icon">↑</span><strong>{form.file?.name ?? "Zgjidh PDF-në e faturës"}</strong><span>PDF nuk largohet nga pajisja gjatë llogaritjes së hash-it · max sipas shfletuesit</span><input type="file" accept="application/pdf,.pdf" onChange={(event) => setForm({ ...form, file: event.target.files?.[0] })} required /></label>
-            <div className="form-footer"><span>Transaksion testues · nuk kryhen pagesa reale</span><button className="primary-button" disabled={busy || wrongChain}>{busy ? "Duke regjistruar…" : "Regjistro faturën →"}</button></div>
+            <label className="file-drop"><span className="upload-icon">↑</span><strong>{form.file?.name ?? "Zgjidh PDF-në e faturës"}</strong><span>Ngarkohet publikisht në IPFS përmes Pinata · maksimumi 10 MB</span><input type="file" accept="application/pdf,.pdf" onChange={(event) => setForm({ ...form, file: event.target.files?.[0] })} required /></label>
+            <p className="storage-warning">IPFS është publik: kushdo që ka CID mund ta lexojë dokumentin. Mos ngarko të dhëna konfidenciale ose personale.</p>
+            <div className="form-footer"><span>Hash-i llogaritet lokalisht · transaksion testues</span><button className="primary-button" disabled={busy || wrongChain}>{busy ? "Duke ngarkuar dhe regjistruar…" : "Ngarko dhe regjistro →"}</button></div>
           </form>
         </section>}
 
@@ -319,17 +433,17 @@ export default function App() {
         </section>}
 
         {view === "actions" && <section className="panel">
-          <div className="panel-heading"><div><h3>Veprimet e faturës</h3><p>Vetëm biznesi dhe klienti mund të ndryshojnë statusin.</p></div><InvoiceSelect invoices={invoices} selectedId={selectedId} onChange={(id) => void loadDetails(id)} /></div>
+          <div className="panel-heading"><div><h3>Veprimet e faturës</h3><p>Vetëm biznesi dhe klienti mund të ndryshojnë statusin.</p></div><InvoiceSelect invoices={invoices} selectedId={selectedId} onChange={(id) => { setSelectedId(id); setActionNote(""); }} /></div>
           {selectedInvoice ? <>
             <InvoiceSummary invoice={selectedInvoice} />
             <div className="action-status"><span>Status aktual</span><StatusBadge status={selectedInvoice.status} /></div>
-            <label className="note-input">Arsye / shënim për kontestim ose anulim<textarea value={actionNote} onChange={(event) => setActionNote(event.target.value)} maxLength={200} placeholder="Shkruaj një shënim të shkurtër…" /></label>
+            {(canDispute || canCancel) && <label className="note-input">Arsye / shënim për kontestim ose anulim<textarea value={actionNote} onChange={(event) => setActionNote(event.target.value)} maxLength={200} placeholder="Shkruaj një shënim të shkurtër…" /></label>}
             <div className="actions-grid">
               <ActionButton title="Dërgo faturën" detail="Biznesi e dërgon te klienti" disabled={busy || selectedInvoice.status !== 0 || !accountMatches(selectedInvoice.issuer, account)} onClick={() => void runAction("send")} />
               <ActionButton title="Prano faturën" detail="Klienti e pranon" disabled={busy || ![1, 3].includes(selectedInvoice.status) || !accountMatches(selectedInvoice.recipient, account)} onClick={() => void runAction("accept")} />
-              <ActionButton title="Kontesto" detail="Klienti hap kontestim" disabled={busy || selectedInvoice.status !== 1 || !accountMatches(selectedInvoice.recipient, account)} onClick={() => void runAction("dispute")} />
+              <ActionButton title="Kontesto" detail="Klienti hap kontestim" disabled={busy || !canDispute} onClick={() => void runAction("dispute")} />
               <ActionButton title="Shëno si të paguar" detail="Klienti konfirmon pagesën" disabled={busy || selectedInvoice.status !== 2 || !accountMatches(selectedInvoice.recipient, account)} onClick={() => void runAction("pay")} />
-              <ActionButton title="Anulo faturën" detail="Biznesi ose klienti, para pagesës" disabled={busy || ![0, 1, 3].includes(selectedInvoice.status) || (!accountMatches(selectedInvoice.issuer, account) && !accountMatches(selectedInvoice.recipient, account))} onClick={() => void runAction("cancel")} />
+              <ActionButton title="Anulo faturën" detail="Biznesi ose klienti, para pagesës" disabled={busy || !canCancel} onClick={() => void runAction("cancel")} />
             </div>
             {!connected && <p className="muted center">Lidh MetaMask me njërën nga adresat e faturës për të aktivizuar veprimet.</p>}
           </> : <EmptyState text="Zgjidh një faturë për të menaxhuar statusin e saj." />}
@@ -338,7 +452,7 @@ export default function App() {
         {view === "verify" && <section className="verify-layout">
           <div className="panel">
             <div className="panel-heading"><div><h3>Verifiko dokumentin</h3><p>Krahaso hash-in SHA-256 të PDF-së me regjistrin publik.</p></div></div>
-            <form onSubmit={verifyInvoice} className="verify-form">
+            <form ref={verifyFormRef} onSubmit={verifyInvoice} className="verify-form">
               <label>Fatura<InvoiceSelect invoices={invoices} selectedId={selectedId} onChange={(id) => { setSelectedId(id); setVerifyResult(""); }} /></label>
               <label className="file-drop compact"><span className="upload-icon">⌕</span><strong>{verifyFile?.name ?? "Zgjidh PDF-në për krahasim"}</strong><span>Hash-i llogaritet lokalisht, dokumenti nuk ngarkohet</span><input type="file" accept="application/pdf,.pdf" onChange={(event) => { setVerifyFile(event.target.files?.[0]); setVerifyResult(""); }} required /></label>
               <button className="primary-button" disabled={!selectedInvoice || !verifyFile}>Verifiko hash-in →</button>
@@ -346,6 +460,19 @@ export default function App() {
             {verifyResult && <div className={`verification-result ${verifyResult}`}><span>{verifyResult === "match" ? "✓" : "!"}</span><div><strong>{verifyResult === "match" ? "Dokumenti përputhet" : "Dokumenti është ndryshuar"}</strong><p>{verifyResult === "match" ? "Hash-i i PDF-së përputhet me hash-in e regjistruar në blockchain." : "Hash-i ndryshon. PDF-ja nuk është i njëjti dokument që u regjistrua."}</p></div></div>}
           </div>
           {selectedInvoice && <div className="panel hash-panel"><span className="eyebrow">HASH-I I REGJISTRUAR</span><code>{selectedInvoice.documentHash}</code><span className="muted">ID e faturës #{selectedInvoice.id.toString()}</span></div>}
+        </section>}
+        {view === "verify" && <section className="panel verification-history-panel">
+          <div className="panel-heading"><div><h3>Historiku i verifikimeve</h3><p>Rezultatet ruhen lokalisht në këtë shfletues.</p></div><span className="event-count">{verificationHistory.length} verifikime</span></div>
+          {verificationHistory.length ? <div className="table-scroll"><table className="verification-history-table"><thead><tr>
+            <th>FATURA</th><th>WALLET</th><th>HASH-I I PDF-SË</th><th>REZULTATI</th><th>DATA DHE ORA</th><th>HASH-I NË BLOCKCHAIN</th>
+          </tr></thead><tbody>{verificationHistory.map((record, index) => <tr key={`${record.verifiedAt}-${record.invoiceId}-${index}`}>
+            <td><strong>INV-{record.invoiceId.padStart(4, "0")}</strong></td>
+            <td><code>{record.wallet}</code></td>
+            <td><code>{record.pdfHash}</code></td>
+            <td><span className={`verification-history-result ${record.result === "Valid" ? "valid" : "invalid"}`}>{record.result}</span></td>
+            <td>{new Date(record.verifiedAt).toLocaleString("sq-AL")}</td>
+            <td><code>{record.blockchainHash}</code></td>
+          </tr>)}</tbody></table></div> : <EmptyState text="Nuk ka ende verifikime të ruajtura." />}
         </section>}
       </main>
     </div>
@@ -386,7 +513,10 @@ function InvoiceSelect({ invoices, selectedId, onChange }: { invoices: Invoice[]
 }
 
 function InvoiceSummary({ invoice }: { invoice: Invoice }) {
-  return <div className="invoice-summary"><div className="summary-top"><div><span className="eyebrow">FATURA</span><h2>INV-{invoice.id.toString().padStart(4, "0")}</h2></div><StatusBadge status={invoice.status} /></div><div className="summary-grid"><div><span>Biznesi</span><strong>{shortAddress(invoice.issuer)}</strong></div><div><span>Klienti</span><strong>{shortAddress(invoice.recipient)}</strong></div><div><span>Shuma</span><strong>{formatAmount(invoice.amount, invoice.currency)}</strong></div><div><span>Hash SHA-256</span><code>{invoice.documentHash.slice(0, 18)}…</code></div></div></div>;
+  const metadataGateway = invoice.metadataURI.startsWith("ipfs://")
+    ? `https://gateway.pinata.cloud/ipfs/${invoice.metadataURI.slice("ipfs://".length)}`
+    : undefined;
+  return <div className="invoice-summary"><div className="summary-top"><div><span className="eyebrow">FATURA</span><h2>INV-{invoice.id.toString().padStart(4, "0")}</h2></div><StatusBadge status={invoice.status} /></div><div className="summary-grid"><div><span>Biznesi</span><strong>{shortAddress(invoice.issuer)}</strong></div><div><span>Klienti</span><strong>{shortAddress(invoice.recipient)}</strong></div><div><span>Shuma</span><strong>{formatAmount(invoice.amount, invoice.currency)}</strong></div><div><span>Hash SHA-256</span><code>{invoice.documentHash.slice(0, 18)}…</code></div><div><span>Dokumenti IPFS</span>{metadataGateway ? <a href={metadataGateway} target="_blank" rel="noreferrer">Hap metadata ↗</a> : <strong>{invoice.metadataURI || "Nuk u ruajt"}</strong>}</div></div></div>;
 }
 
 function ActionButton({ title, detail, disabled, onClick }: { title: string; detail: string; disabled: boolean; onClick: () => void }) {

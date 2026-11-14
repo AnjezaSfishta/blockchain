@@ -51,7 +51,7 @@ Në fushëveprimin e zgjidhjes përfshihen:
 6. API REST për indeksimin dhe leximin e eventeve.
 7. Teste automatike, përfshirë kërkesa të paautorizuara dhe kalime të pavlefshme.
 
-Ruajtja e përhershme e PDF-ve në IPFS ose në një shërbim të jashtëm storage nuk është pjesë e implementimit aktual. PDF-të e demonstrimit krijohen lokalisht. Kontrata mund të ruajë një URI të metadata-s, por vetë ngarkimi dhe menaxhimi i përmbajtjes off-chain kërkon integrim të veçantë.
+PDF-ja e faturës dhe metadata ruhen off-chain në IPFS përmes Pinata. Backend-i mban JWT-në e Pinata-s dhe ngarkon PDF-në bashkë me një JSON që përmban CID-në dhe hash-in SHA-256; blockchain-i ruan hash-in dhe URI-në e metadata-s. Përmbajtja e IPFS është publike dhe nuk duhet përdorur për dokumente konfidenciale apo të dhëna personale.
 
 ## 3. Arkitektura e sistemit
 
@@ -61,15 +61,22 @@ Ruajtja e përhershme e PDF-ve në IPFS ose në një shërbim të jashtëm stora
 │ pesë pamje           │      │ nënshkrimi i transaksioneve │
 └──────────┬───────────┘      └──────────────┬──────────────┘
            │ ethers.js                       │
-           │ leximet                          │ transaksionet
+           │ leximet/ngarkimet                │ transaksionet
            ▼                                  ▼
 ┌──────────────────────┐      ┌─────────────────────────────┐
-│ API REST             │◀─────│ Hardhat / Sepolia           │
-│ Node.js / Express    │ evente│ InvoiceRegistry            │
-│ indeksues në memorie │      │ InvoiceWorkflow            │
-└──────────────────────┘      └─────────────────────────────┘
+│ API REST             │─────▶│ Pinata / IPFS               │
+│ Node.js / Express    │ upload│ PDF dhe JSON metadata       │
+│ indeksues në memorie │      └─────────────────────────────┘
+└──────────┬───────────┘
+           │ evente
+           ▼
+┌─────────────────────────────┐
+│ Hardhat / Sepolia           │
+│ InvoiceRegistry             │
+│ InvoiceWorkflow             │
+└─────────────────────────────┘
 
-PDF dhe metadata: jashtë blockchain-it
+PDF dhe metadata: IPFS (publike)
 Hash SHA-256, palët dhe historiku i statusit: në blockchain
 ```
 
@@ -81,7 +88,7 @@ Hash SHA-256, palët dhe historiku i statusit: në blockchain
 | `InvoiceWorkflow` | Zbaton kalimet e statusit dhe ruan historikun me autorin, kohën dhe shënimin. |
 | Frontend React | Ofron pamjet e përdoruesit, llogarit hash-in e PDF-së dhe lexon kontratat. |
 | MetaMask | Jep llogarinë aktive dhe nënshkruan transaksionet e përdoruesit. |
-| API Express | Indekson eventet dhe ekspozon endpoint-e leximi për faturat dhe historikun. |
+| API Express | Indekson eventet, pranon PDF-në dhe publikon PDF/metadata në Pinata/IPFS. |
 | Hardhat / Sepolia | Rrjetet për zhvillim lokal dhe demonstrim testues. |
 
 ### 3.2 Rolet
@@ -105,7 +112,7 @@ Regjistrimi i faturës përmban:
 | `documentHash` | Hash 32-bajtësh SHA-256 i PDF-së. |
 | `amount` | Shuma në njësi me dy shifra dhjetore, e ruajtur si numër i plotë. |
 | `currency` | Kodi i monedhës, për shembull `EUR`. |
-| `metadataURI` | Referencë opsionale për metadata off-chain; nuk ngarkon vetë dokumentin. |
+| `metadataURI` | URI IPFS e JSON metadata-s që përmban URI-në e PDF-së dhe hash-in SHA-256. |
 | `createdAt` | Koha e regjistrimit në blockchain. |
 
 Për çdo ndryshim statusi regjistrohen statusi i ri, adresa që kreu veprimin, koha dhe një shënim.
@@ -221,7 +228,10 @@ REGISTRY_ADDRESS=0x...
 WORKFLOW_ADDRESS=0x...
 DEPLOYMENT_BLOCK=0
 CORS_ORIGIN=http://localhost:5173
+PINATA_JWT=vendosni_jwt_e_pinata_s
 ```
+
+Krijoni një JWT me leje ngarkimi në Pinata dhe mbajeni vetëm në `backend/.env`; mos e vendosni në frontend, repository ose blockchain. Regjistrimi ngarkon PDF-në (deri në 10 MB) dhe JSON metadata para se të dërgojë transaksionin. Nëse transaksioni refuzohet pas ngarkimit, përmbajtja mund të mbetet e pin-uar në IPFS.
 
 Nisni shërbimet në terminale të ndara:
 
@@ -234,7 +244,7 @@ Ndërfaqja bëhet e disponueshme në `http://localhost:5173`. Për të nënshkru
 
 ### 6.4 Përgatitja e të dhënave demonstrative
 
-Në rrjetin lokal të sapodeploy-uar, vendosni adresat në sesionin PowerShell dhe ekzekutoni seed-in:
+Në rrjetin lokal të sapodeploy-uar, vendosni adresat në sesionin PowerShell dhe ekzekutoni seed-in. Skripti lexon `PINATA_JWT` nga `backend/.env`, ngarkon pesë PDF sintetike dhe metadata-n e tyre në Pinata, pastaj regjistron URI-të në kontratë:
 
 ```powershell
 $env:REGISTRY_ADDRESS="0x..."
@@ -242,13 +252,13 @@ $env:WORKFLOW_ADDRESS="0x..."
 npm run demo:seed -- --network localhost
 ```
 
-Skripti krijon pesë PDF sintetike në `demo/documents/` dhe regjistron pesë fatura. Një faturë shënohet e kontestuar; të tjerat japin shembuj të statusit të paguar, pranuar, dërguar dhe regjistruar. Për demonstrimin e verifikimit:
+Skripti krijon pesë PDF sintetike në `demo/documents/` dhe regjistron pesë fatura me metadataURI IPFS. Ai përgatit tri rrjedha të dallueshme: fatura #1 dërgohet, pranohet dhe paguhet; #2 dërgohet dhe kontestohet; #3 dërgohet dhe pranohet. Për demonstrimin e verifikimit:
 
 1. Verifikoni faturën #1 me `invoice-001.pdf`; hash-i duhet të përputhet.
 2. Verifikoni të njëjtën faturë me `invoice-001-altered.pdf`; hash-i duhet të mos përputhet.
 3. Verifikoni faturën #3 me `invoice-003.pdf`; hash-i duhet të përputhet.
 
-Seed-i mund të ekzekutohet vetëm mbi një deploy pa fatura ekzistuese. Për një demonstrim të ri, nisni rrjet lokal të pastër, bëni deploy përsëri dhe pastaj ekzekutoni seed-in. PDF-të janë të dhëna sintetike dhe nuk përmbajnë dokumente reale.
+Seed-i mund të ekzekutohet vetëm mbi një deploy pa fatura ekzistuese dhe përdor llogari të ndara të Hardhat-it për biznesin dhe klientin; është për demonstrim lokal, jo për Sepolia. Për një demonstrim të ri, nisni rrjet lokal të pastër, bëni deploy përsëri dhe pastaj ekzekutoni seed-in. PDF-të janë të dhëna sintetike dhe nuk përmbajnë dokumente reale.
 
 ## 7. Deploy dhe demonstrimi në Sepolia
 
@@ -293,7 +303,7 @@ Kriteret kryesore të pranimit janë:
 - **Privilegjet administrative:** administratori mund të konfigurojë workflow-n dhe auditorët. Çelësi administrativ duhet të mbahet jashtë repository-t dhe përdorimit të përditshëm.
 - **Kufizimet e hash-it:** krahasimi provon integritetin e bajteve të dokumentit ndaj hash-it të ruajtur, por jo vërtetësinë ligjore, identitetin ose vlefshmërinë tregtare.
 - **API-ja:** indeksuesi nuk ruan gjendje të qëndrueshme dhe varet nga disponueshmëria e RPC-së. Verifikimet kritike duhet të bazohen në kontrata.
-- **Ruajtja off-chain:** backend-i aktual indekson eventet dhe nuk ngarkon apo ruan PDF. Për përdorim përtej demonstrimit duhet integruar një shërbim ruajtjeje i kontrolluar ose IPFS, me politika të përshtatshme privatësie.
+- **Ruajtja off-chain:** PDF-ja dhe metadata ngarkohen në IPFS përmes Pinata. IPFS është publik dhe përmbajtja e pin-uar mund të mbetet e qasshme edhe pas fshirjes nga llogaria Pinata; përdorni vetëm dokumente sintetike/testuese. Endpoint-i i demonstrimit nuk ka autentikim apo kufizim shpejtësie dhe nuk duhet ekspozuar publikisht pa këto masa.
 - **Pagesa:** statusi `Paid` është deklarim i klientit në kontratë. Projekti nuk kryen pagesa bankare dhe nuk transferon tokena.
 - **Varësitë:** kontrolli `npm audit --omit=dev` ka raportuar zero dobësi në varësitë e runtime-it. Auditimi i plotë mund të raportojë këshillime për paketat e zhvillimit; përpara përdorimit në prodhim nevojitet vlerësim dhe përditësim i toolchain-it.
 
@@ -333,7 +343,6 @@ Për dëshmi të kontributit individual, detyrat duhet të ndahen në Issues, pu
 | Testet automatike | 32 teste të kontratave kalojnë lokalisht. |
 | Shembujt demonstrues | Pesë fatura dhe PDF sintetike krijohen në rrjetin lokal. |
 | Deploy-i dhe transaksioni në Sepolia | Kërkojnë RPC URL dhe Sepolia ETH; duhen kryer e dokumentuar nga ekipi. |
-| Storage i PDF-ve në IPFS ose backend | Nuk është implementuar; aktualisht PDF-të e seed-it janë lokale. |
+| Ngarkimi i PDF-ve dhe metadata-s në Pinata/IPFS | Implementuar për regjistrimin nga frontend-i; kërkon `PINATA_JWT` në backend dhe përdorim me dokumente testuese. |
 | Repository, Issues/PR dhe dëshmitë e ekipit | Plotësohen nga ekipi. |
 | Videoja dhe mbrojtja individuale | Përgatiten dhe realizohen nga ekipi. |
-
