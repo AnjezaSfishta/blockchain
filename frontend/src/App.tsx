@@ -20,6 +20,16 @@ type VerificationRecord = {
   blockchainHash: string;
 };
 
+type IconName = "grid" | "plus" | "clock" | "arrows" | "shield";
+
+const iconPaths: Record<IconName, string[]> = {
+  grid: ["M3.5 3.5h6v6h-6z", "M14.5 3.5h6v6h-6z", "M3.5 14.5h6v6h-6z", "M14.5 14.5h6v6h-6z"],
+  plus: ["M12 5v14", "M5 12h14"],
+  clock: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M12 7v5l3 2"],
+  arrows: ["M7 7h13l-3-3", "M17 17H4l3 3", "M20 7l-3 3", "M4 17l3-3"],
+  shield: ["M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z", "m9 12 2 2 4-4"]
+};
+
 function isVerificationRecord(value: unknown): value is VerificationRecord {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
@@ -73,6 +83,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [verifyResult, setVerifyResult] = useState<"match" | "mismatch" | "">("");
   const [verifyFile, setVerifyFile] = useState<File>();
+  const [previewUrl, setPreviewUrl] = useState("");
   const [verificationHistory, setVerificationHistory] = useState<VerificationRecord[]>([]);
   const registerFormRef = useRef<HTMLFormElement>(null);
   const verifyFormRef = useRef<HTMLFormElement>(null);
@@ -118,7 +129,31 @@ export default function App() {
     counts[invoice.status] = (counts[invoice.status] ?? 0) + 1;
     return counts;
   }, {}), [invoices]);
+  const invoiceActivity = useMemo(() => {
+    const now = new Date();
+    return Array.from({ length: 6 }, (_, index) => {
+      const month = new Date(now.getFullYear(), now.getMonth() - 5 + index, 1);
+      return {
+        label: month.toLocaleDateString("sq-AL", { month: "short" }),
+        count: invoices.filter((invoice) => {
+          const createdAt = new Date(Number(invoice.createdAt) * 1000);
+          return createdAt.getFullYear() === month.getFullYear() && createdAt.getMonth() === month.getMonth();
+        }).length
+      };
+    });
+  }, [invoices]);
 
+  useEffect(() => {
+    if (!form.file) {
+      setPreviewUrl("");
+      return;
+    }
+    const url = URL.createObjectURL(form.file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [form.file]);
+
+  const activityPeak = Math.max(1, ...invoiceActivity.map((month) => month.count));
   const wallet = useCallback(async () => {
     if (!window.ethereum) throw new Error("MetaMask nuk u gjet. Instaloje dhe provo përsëri.");
     return new BrowserProvider(window.ethereum);
@@ -362,11 +397,11 @@ export default function App() {
         <a className="brand" href="#" onClick={(event) => { event.preventDefault(); navigateToView("overview"); }}><span className="brand-mark">F</span><span>Fatura<span className="brand-dot"></span></span></a>
         <div className="side-label">MENAXHIMI</div>
         <nav className="navigation" aria-label="Navigimi kryesor">
-          <NavButton active={view === "overview"} onClick={() => navigateToView("overview")} icon="▦">Pasqyra</NavButton>
-          <NavButton active={view === "register"} onClick={() => navigateToView("register")} icon="+">Regjistro faturë</NavButton>
-          <NavButton active={view === "details"} onClick={() => navigateToView("details")} icon="◷">Historia</NavButton>
-          <NavButton active={view === "actions"} onClick={() => navigateToView("actions")} icon="⇄">Veprimet</NavButton>
-          <NavButton active={view === "verify"} onClick={() => navigateToView("verify")} icon="✓">Verifiko PDF</NavButton>
+          <NavButton active={view === "overview"} onClick={() => navigateToView("overview")} icon="grid">Përmbledhje</NavButton>
+          <NavButton active={view === "register"} onClick={() => navigateToView("register")} icon="plus">Regjistro faturë</NavButton>
+          <NavButton active={view === "details"} onClick={() => navigateToView("details")} icon="clock">Historia</NavButton>
+          <NavButton active={view === "actions"} onClick={() => navigateToView("actions")} icon="arrows">Veprimet</NavButton>
+          <NavButton active={view === "verify"} onClick={() => navigateToView("verify")} icon="shield">Verifiko PDF</NavButton>
         </nav>
         <div className="sidebar-bottom">
           <div className="network-indicator"><span className="pulse" /> Rrjet testues</div>
@@ -392,8 +427,8 @@ export default function App() {
 
         {view === "overview" && <section>
           <div className="welcome-row">
-            <div><h2>Faturat e ekipit</h2><p>Gjurmim i verifikueshëm, nga regjistrimi deri te pagesa.</p></div>
-            {/* <button className="primary-button" onClick={() => navigateToView("register")}><span>+</span> Regjistro faturë</button> */}
+            <div><span className="section-kicker">PAMJE E PËRGJITHSHME</span><h2>Faturat e ekipit</h2><p>Gjurmim i verifikueshëm, nga regjistrimi deri te pagesa.</p></div>
+            <button className="primary-button" onClick={() => navigateToView("register")}><span>+</span> Regjistro faturë</button>
           </div>
           <div className="stats-grid">
             <Stat label="Gjithsej fatura" value={invoices.length} icon="▤" tone="blue" />
@@ -401,8 +436,27 @@ export default function App() {
             <Stat label="Kontestuara" value={statusCounts[3] ?? 0} icon="!" tone="red" />
             <Stat label="Të paguara" value={statusCounts[4] ?? 0} icon="✓" tone="green" />
           </div>
+          <div className="dashboard-grid">
+            <div className="panel activity-panel">
+              <div className="panel-heading"><div><span className="section-kicker">GJASHTË MUAJT E FUNDIT</span><h3>Aktiviteti i faturave</h3><p>Fatura të regjistruara sipas muajit</p></div><span className="chart-total">{invoices.length} gjithsej</span></div>
+              <div className="activity-chart" role="img" aria-label="Regjistrimet e faturave sipas muajit">
+                {invoiceActivity.map((month, index) => {
+                  return <div className="chart-column" key={index}><span className="chart-value">{month.count || ""}</span><div className="chart-track"><span style={{ height: `${Math.max(4, (month.count / activityPeak) * 100)}%` }} /></div><span className="chart-month">{month.label}</span></div>;
+                })}
+              </div>
+              <div className="chart-footnote"><span><i /> Fatura të regjistruara</span><span>Burimi: regjistri në blockchain</span></div>
+            </div>
+            <div className="panel status-panel">
+              <div className="panel-heading"><div><span className="section-kicker">PORTOFOLI</span><h3>Statusi i faturave</h3><p>Shpërndarja aktuale sipas statusit</p></div></div>
+              <div className="status-breakdown">{statusNames.map((name, index) => {
+                const count = statusCounts[index] ?? 0;
+                const share = invoices.length ? (count / invoices.length) * 100 : 0;
+                return <div className="status-breakdown-row" key={name}><div><span className={`status-key status-${statusClasses[index]}`} /><span>{name}</span><strong>{count}</strong></div><span className="status-meter"><i className={`status-${statusClasses[index]}`} style={{ width: `${share}%` }} /></span></div>;
+              })}</div>
+            </div>
+          </div>
           <div className="panel">
-            <div className="panel-heading"><div><h3>Faturat e fundit</h3><p>Gjendja e faturave të regjistruara në kontratë</p></div><button className="text-button" onClick={() => loadInvoices().catch((loadError: unknown) => setError(readableError(loadError)))}>Rifresko ↻</button></div>
+            <div className="panel-heading"><div><span className="section-kicker">REGJISTRI</span><h3>Faturat e fundit</h3><p>Gjendja e faturave të regjistruara në kontratë</p></div><button className="text-button" onClick={() => loadInvoices().catch((loadError: unknown) => setError(readableError(loadError)))}>Rifresko <span>↻</span></button></div>
             <InvoiceTable invoices={invoices} onSelect={loadDetails} />
           </div>
           {apiUrl && <div className="panel api-panel"><div className="panel-heading"><div><h3>Aktiviteti në blockchain</h3><p>Eventet e fundit të indeksuara nga API</p></div><span className="event-count">{apiEvents.length} evente</span></div>
@@ -411,17 +465,24 @@ export default function App() {
         </section>}
 
         {view === "register" && <section className="form-page">
-          <div className="intro-card"><div className="intro-icon">↗</div><div><h2>Krijo një faturë të verifikueshme</h2><p>PDF-ja nuk ngarkohet në blockchain. Aplikacioni llogarit SHA-256 në pajisjen tënde dhe publikon vetëm hash-in.</p></div></div>
+          <div className="intro-card"><div className="intro-icon"><Icon name="plus" /></div><div><span className="section-kicker">FATURË E RE</span><h2>Krijo një faturë të verifikueshme</h2><p>PDF-ja nuk ngarkohet në blockchain. Aplikacioni llogarit SHA-256 në pajisjen tënde dhe publikon vetëm hash-in.</p></div></div>
+          <div className="register-layout">
           <form ref={registerFormRef} className="panel invoice-form" onSubmit={registerInvoice}>
             <div className="form-grid">
-              <label>Adresa e klientit<input value={form.recipient} onChange={(event) => setForm({ ...form, recipient: event.target.value })} placeholder="0x…" required /></label>
-              <label>Shuma<input type="number" min="0.01" step="0.01" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} placeholder="125.00" required /></label>
+              <label>Adresa e klientit<input value={form.recipient} onChange={(event) => setForm({ ...form, recipient: event.target.value })} placeholder="0x…" autoComplete="off" required /></label>
+              <label>Shuma<input type="number" min="0.01" step="0.01" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} placeholder="125.00" inputMode="decimal" required /></label>
               <label>Monedha<select value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value })}><option>EUR</option><option>USD</option><option>ALL</option></select></label>
             </div>
-            <label className="file-drop"><span className="upload-icon">↑</span><strong>{form.file?.name ?? "Zgjidh PDF-në e faturës"}</strong><span>Ngarkohet publikisht në IPFS përmes Pinata · maksimumi 10 MB</span><input type="file" accept="application/pdf,.pdf" onChange={(event) => setForm({ ...form, file: event.target.files?.[0] })} required /></label>
+            <label className="file-drop"><span className="upload-icon">↑</span><strong>{form.file?.name ?? "Zgjidh PDF-në e faturës"}</strong><span>{form.file ? `${(form.file.size / (1024 * 1024)).toFixed(2)} MB · gati për ngarkim` : "Kliko për të zgjedhur një PDF nga pajisja jote"}</span><small>PDF · maksimumi 10 MB</small><input type="file" accept="application/pdf,.pdf" onChange={(event) => setForm({ ...form, file: event.target.files?.[0] })} required /></label>
             <p className="storage-warning">IPFS është publik: kushdo që ka CID mund ta lexojë dokumentin. Mos ngarko të dhëna konfidenciale ose personale.</p>
             <div className="form-footer"><span>Hash-i llogaritet lokalisht · transaksion testues</span><button className="primary-button" disabled={busy || wrongChain}>{busy ? "Duke ngarkuar dhe regjistruar…" : "Ngarko dhe regjistro →"}</button></div>
           </form>
+          <aside className="panel pdf-preview-panel">
+            <div className="panel-heading"><div><span className="section-kicker">PARAPAMJE LIVE</span><h3>Parapamja e faturës</h3><p>Kontrollo dokumentin përpara regjistrimit</p></div><span className="preview-tag">PDF</span></div>
+            {previewUrl ? <iframe className="pdf-preview" src={previewUrl} title="Parapamje e PDF-së së faturës" /> : <div className="preview-empty"><div className="preview-document"><span>PDF</span><i>+</i><b /><b /><b /><b /></div><strong>Ngarko një faturë për ta parë</strong><span>Parapamja shfaqet këtu, dokumenti mbetet në pajisjen tënde deri në ngarkim.</span></div>}
+            <div className="preview-security"><Icon name="shield" /><span><strong>SHA-256 i sigurt</strong><small>Hash-i llogaritet lokalisht në pajisjen tënde.</small></span></div>
+          </aside>
+          </div>
         </section>}
 
         {view === "details" && <section className="panel">
@@ -484,11 +545,15 @@ function accountMatches(expected: string, actual: string) {
 }
 
 function pageTitle(view: View) {
-  return { overview: "Pasqyra", register: "Regjistro faturë", details: "Historia e auditimit", actions: "Menaxho faturën", verify: "Verifiko dokumentin" }[view];
+  return { overview: "Përmbledhje", register: "Regjistro faturë", details: "Historia e auditimit", actions: "Menaxho faturën", verify: "Verifiko dokumentin" }[view];
 }
 
-function NavButton({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: string; children: React.ReactNode }) {
-  return <button className={`nav-item ${active ? "active" : ""}`} onClick={onClick}><span className="nav-icon">{icon}</span>{children}</button>;
+function Icon({ name }: { name: IconName }) {
+  return <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{iconPaths[name].map((path) => <path d={path} key={path} />)}</svg>;
+}
+
+function NavButton({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: IconName; children: React.ReactNode }) {
+  return <button className={`nav-item ${active ? "active" : ""}`} onClick={onClick}><span className="nav-icon"><Icon name={icon} /></span>{children}</button>;
 }
 
 function Stat({ label, value, icon, tone }: { label: string; value: number; icon: string; tone: string }) {
