@@ -4,13 +4,11 @@
 
 **Lënda:** Teknologjitë Blockchain  
 **Niveli:** Master  
-**Lloji i zgjidhjes:** Aplikacion i decentralizuar (dApp) me kontrata inteligjente dhe shërbim Web2  
-**Rrjeti i synuar për demonstrim:** Sepolia  
-**Rrjeti i zhvillimit dhe testimit:** Hardhat Network  
-**Ekipi:** plotësohet nga anëtarët e ekipit  
-**Data:** plotësohet para dorëzimit
+**Projekti:**  Gjurmimi dhe verifikimi i faturave të biznesit
 
-> **Shënim për përdorimin e sigurt:** Projekti është demonstrues dhe duhet ekzekutuar me të dhëna dhe llogari testuese. Mos regjistroni dokumente reale, të dhëna personale, fraza rikuperimi ose çelësa privatë në repository, blockchain apo materialet e prezantimit.
+**Ekipi:** Anjeza Sfishta & Erza Merovci & Fortesa Cena 
+
+
 
 ## Përmbledhje
 
@@ -19,6 +17,8 @@ Ky projekt trajton regjistrimin dhe gjurmimin e faturave të biznesit përmes nj
 Zgjidhja përbëhet nga dy kontrata inteligjente të lidhura (`InvoiceRegistry` dhe `InvoiceWorkflow`), një ndërfaqe React, integrimi me MetaMask dhe një API REST me Node.js/Express për indeksimin e eventeve. Kontratat ruajnë statusin dhe historikun e veprimeve, ndërsa API-ja ofron lexime të përshtatshme për aplikacionin. Testet automatike verifikojnë rregullat e procesit, autorizimin dhe rastet e pavlefshme.
 
 **Fjalë kyçe:** blockchain, kontratë inteligjente, faturë, SHA-256, auditim, dApp, Sepolia.
+
+> **Sqarim për rrjetet:** Testimi praktik i aplikacionit, integrimeve dhe rrjedhave të faturave është kryer në Sepolia. Hardhat Network përdoret veçmas si mjedis lokal për ekzekutimin e 35 testeve automatike të kontratave me komandën `npm test`.
 
 ## 1. Hyrje dhe përkufizimi i problemit
 
@@ -39,6 +39,21 @@ Qëllimi është ndërtimi i një prototipi funksional që mundëson regjistrimi
 - Të indeksohen eventet e kontratave përmes një API-je REST.
 - Të verifikohen kërkesat me teste automatike dhe demonstrim lokal.
 
+## Pamje nga aplikacioni
+
+Pamjet më poshtë paraqesin përmbledhjen e faturave, formularin e regjistrimit me parapamjen PDF, historikun e ciklit jetësor dhe ndërfaqen e verifikimit.
+
+<table>
+  <tr>
+    <td align="center"><strong>Përmbledhja</strong><br><img src="docs/screenshots/01-permbledhje.png" alt="Paneli i përmbledhjes me statistika, grafik dhe faturat" width="100%"></td>
+    <td align="center"><strong>Regjistrimi i faturës</strong><br><img src="docs/screenshots/02-regjistro-fature.png" alt="Formulari i regjistrimit të faturës dhe parapamja PDF" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Historia e faturës</strong><br><img src="docs/screenshots/03-historia-fatures.png" alt="Detajet dhe historia e auditimit për faturën INV-0001" width="100%"></td>
+    <td align="center"><strong>Verifikimi i PDF-së</strong><br><img src="docs/screenshots/04-verifikimi-pdf.png" alt="Ndërfaqja e verifikimit të PDF-së dhe historiku i rezultateve" width="100%"></td>
+  </tr>
+</table>
+
 ## 2. Kërkesat dhe kufiri i projektit
 
 Në fushëveprimin e zgjidhjes përfshihen:
@@ -47,7 +62,7 @@ Në fushëveprimin e zgjidhjes përfshihen:
 2. Role të dallueshme dhe validime të autorizimit.
 3. Gjashtë statuse të faturës dhe historik i ndryshimeve.
 4. Evente blockchain-i për regjistrimin dhe veprimet e procesit.
-5. Pesë pamje të dApp-it: pasqyra, regjistrimi, historia, veprimet dhe verifikimi.
+5. Pesë pamje të dApp-it: përmbledhja, regjistrimi, historia, veprimet dhe verifikimi.
 6. API REST për indeksimin dhe leximin e eventeve.
 7. Teste automatike, përfshirë kërkesa të paautorizuara dhe kalime të pavlefshme.
 
@@ -191,7 +206,7 @@ npm run compile
 npm test
 ```
 
-Paketa aktuale përmban 32 teste automatike të kontratave, përfshirë testet e autorizimit, validimeve, eventeve dhe kalimeve të statusit.
+Paketa aktuale përmban 35 teste automatike të kontratave, përfshirë testet e autorizimit, validimeve, eventeve dhe kalimeve të statusit.
 
 ### 6.3 Nisja e rrjetit dhe deploy-i lokal
 
@@ -244,7 +259,7 @@ Ndërfaqja bëhet e disponueshme në `http://localhost:5173`. Për të nënshkru
 
 ### 6.4 Përgatitja e të dhënave demonstrative
 
-Në rrjetin lokal të sapodeploy-uar, vendosni adresat në sesionin PowerShell dhe ekzekutoni seed-in. Skripti lexon `PINATA_JWT` nga `backend/.env`, ngarkon pesë PDF sintetike dhe metadata-n e tyre në Pinata, pastaj regjistron URI-të në kontratë:
+Në rrjetin lokal të sapo deploy-uar, vendosni adresat në sesionin PowerShell dhe ekzekutoni seed-in. Skripti lexon `PINATA_JWT` nga `backend/.env`, ngarkon pesë PDF sintetike dhe metadata-n e tyre në Pinata, pastaj regjistron URI-të në kontratë:
 
 ```powershell
 $env:REGISTRY_ADDRESS="0x..."
@@ -260,12 +275,14 @@ Skripti krijon pesë PDF sintetike në `demo/documents/` dhe regjistron pesë fa
 
 Seed-i mund të ekzekutohet vetëm mbi një deploy pa fatura ekzistuese dhe përdor llogari të ndara të Hardhat-it për biznesin dhe klientin; është për demonstrim lokal, jo për Sepolia. Për një demonstrim të ri, nisni rrjet lokal të pastër, bëni deploy përsëri dhe pastaj ekzekutoni seed-in. PDF-të janë të dhëna sintetike dhe nuk përmbajnë dokumente reale.
 
-## 7. Deploy dhe demonstrimi në Sepolia
+## 7. Deploy dhe testimi në Sepolia
 
-Deploy-i në Sepolia kërkon RPC URL, çelësin e një llogarie testuese dhe Sepolia ETH. Këto të dhëna duhet të sigurohen nga ekipi; nuk përfshihen në repository.
+Kontratat `InvoiceRegistry` dhe `InvoiceWorkflow` janë deploy-uar dhe aplikacioni është testuar në rrjetin testues Sepolia. Për arsye sigurie, URL-ja private RPC, çelësat, të dhënat e llogarive dhe konfigurimet lokale nuk përfshihen në këtë dokument ose në repository.
+
+Për ta përsëritur deploy-in, përdorni një llogari dhe fonde testuese:
 
 1. Kopjoni `.env.example` në `.env`.
-2. Plotësoni `SEPOLIA_RPC_URL` dhe `DEPLOYER_PRIVATE_KEY` me konfigurim testues. Mos e komitoni `.env`.
+2. Plotësoni `SEPOLIA_RPC_URL` dhe `DEPLOYER_PRIVATE_KEY`. Mos e komitoni skedarin `.env`.
 3. Siguroni Sepolia ETH përmes një faucet-i të përshtatshëm.
 4. Ekzekutoni:
 
@@ -274,28 +291,58 @@ npm run deploy:sepolia
 ```
 
 5. Përdorni adresat e krijuara te `deployments/sepolia.json` për konfigurimin e frontend-it dhe backend-it. Vendosni `VITE_CHAIN_ID=11155111` dhe `RPC_URL` të rrjetit Sepolia.
-6. Rinisni frontend-in dhe backend-in, lidhni MetaMask me Sepolia dhe demonstroni një transaksion testues.
+6. Rinisni frontend-in dhe backend-in, lidhni MetaMask me Sepolia dhe kryeni transaksione vetëm me llogari testuese.
 
-Deploy-i në Sepolia nuk kryhet pa konfigurim dhe financim testues. Pas deploy-it, adresat, transaksioni dhe blloku duhet të dokumentohen në raportin ose materialet e demonstrimit të ekipit. Mos përfshini çelësa privatë.
+### 7.1 Rezultatet e testimit në Sepolia
 
-## 8. Testimi dhe kriteret e verifikimit
+Në demonstrimin e realizuar u regjistruan pesë fatura dhe u provuan fazat kryesore të ciklit jetësor:
 
-Testet ekzekutohen me `npm test`. Mbulohen, ndër të tjera:
+| Fatura | Statusi përfundimtar |
+|---|---|
+| `INV-0001` | E paguar (`Paid`) |
+| `INV-0002` | E anuluar (`Cancelled`), pas testimit të kontestimit dhe anulimit |
+| `INV-0003` | E pranuar (`Accepted`) |
+| `INV-0004` | E dërguar (`Sent`) |
+| `INV-0005` | E regjistruar (`Registered`) |
 
-- konfigurimi i lidhjes ndërmjet kontratave;
-- regjistrimi dhe validimi i të dhënave të faturës;
-- refuzimi i adresave dhe inputeve të pavlefshme;
-- veprimet e paautorizuara të administratorit dhe palëve të treta;
-- dërgimi, pranimi, kontestimi, pagesa dhe anulimi;
-- refuzimi i kalimeve të pavlefshme të statusit;
-- ruajtja kronologjike e historikut dhe emetimi i eventeve.
+Gjatë testimit u krye deploy-i i kontratave, lidhja e aplikacionit dhe MetaMask me Sepolia, regjistrimi i faturave nga llogaria e biznesit, si dhe veprime nga llogaria e klientit. Transaksionet dhe statuset u kontrolluan përmes aplikacionit dhe regjistrit në blockchain. Identifikuesit e transaksioneve, adresat dhe blloqet mund të shtohen në aneksin e raportit nëse kërkohen për demonstrimin; çelësat privatë nuk duhet të publikohen.
 
-Kriteret kryesore të pranimit janë:
+## 8. Përmbledhje e testimeve dhe kriteret e pranimit
 
-1. PDF-ja e ndryshuar nuk përputhet me hash-in e regjistruar.
-2. Vetëm pala e lejuar mund të kryejë veprimin përkatës.
-3. Historia e ndryshimeve të statusit është e lexueshme dhe e auditueshme.
-4. Demonstrimi përmban pesë fatura, një kontestim dhe tri verifikime.
+Testet automatike ekzekutohen nga rrënja e projektit me `npm test`. Në testimin e raportuar, **35 teste të kontratave inteligjente kaluan me sukses**. Përveç tyre, u kryen testime integrimi në Sepolia dhe verifikime përmes ndërfaqes, API-së dhe IPFS.
+
+### 8.1 Testet e kontratave inteligjente
+
+Testet Hardhat mbulojnë konfigurimin e `InvoiceWorkflow` me `InvoiceRegistry`, autorizimet e administratorit dhe të palëve, regjistrimin e faturave dhe validimin e të dhënave, si dhe veprimet e ciklit jetësor. U testuan gjithashtu inputet e pavlefshme, kalimet e palejuara të statusit, faturat që nuk ekzistojnë, emetimi i eventeve dhe ruajtja e historikut.
+
+Rastet e përfshira përfshijnë dërgimin, pranimin, kontestimin, pagesën dhe anulimin; refuzimin e arsyeve bosh për kontestim; refuzimin e pagesës para pranimit; dhe refuzimin e ndryshimit të statusit pas pagesës.
+
+### 8.2 Testimi i faturave dhe ciklit jetësor në Sepolia
+
+U testuan **5 fatura** me biznesin si lëshues dhe llogari të veçantë si klient. U verifikuan lidhja me MetaMask, regjistrimi në `InvoiceRegistry`, ndryshimet e statusit përmes `InvoiceWorkflow`, transaksionet dhe paraqitja e statusit aktual në aplikacion.
+
+Statuset përfundimtare të faturave janë dokumentuar te [rezultatet e testimit në Sepolia](#71-rezultatet-e-testimit-në-sepolia). Gjatë demonstrimit u testua edhe kontestimi i `INV-0002`, para se fatura të anulohej.
+
+### 8.3 Testimi i PDF-së dhe integritetit SHA-256
+
+U kryen **5 verifikime PDF**, përfshirë dokumente origjinale dhe të ndryshuara:
+
+- Për PDF-në origjinale, hash-i SHA-256 i llogaritur në shfletues përputhet me hash-in e faturës së regjistruar dhe rezultati shfaqet si `Valid`.
+- Për PDF-në e ndryshuar, hash-i nuk përputhet dhe rezultati shfaqet si `Invalid`.
+- U kontrolluan shfaqja e hash-it të PDF-së dhe hash-it të regjistruar, si dhe ruajtja e rezultatit, datës, orës dhe wallet-it në historikun lokal të verifikimeve.
+
+Numri minimal i kërkuar për demonstrim ishte tri verifikime; u realizuan pesë.
+
+### 8.4 Testimi i roleve dhe autorizimeve
+
+U përdorën llogari të veçanta për biznesin dhe klientin. Gjithashtu u testua një wallet i paautorizuar; veprimet e ndryshimit të statusit nuk iu mundësuan në ndërfaqe. Rregullat e autorizimit të kontratave mbulohen edhe nga testet automatike Hardhat.
+
+### 8.5 Testimi i API-së, IPFS-së dhe historikut
+
+U testuan komunikimi ndërmjet frontend-it dhe backend-it, API-ja REST për leximin e të dhënave dhe indeksimin e eventeve të kontratave. U kontrollua shfaqja e eventeve të regjistrimit dhe ndryshimeve të statusit, përfshirë adresën që kreu veprimin, kohën dhe shënimin kur është i disponueshëm.
+
+PDF-të u ngarkuan në IPFS përmes Pinata-s; URI-ja e metadata-s u lidh me faturën në blockchain. U testua hapja e metadata-s përmes lidhjes IPFS, shfaqja kronologjike e historikut të statusit dhe ruajtja lokale e historikut të verifikimeve pas rifreskimit të faqes.
+
 
 ## 9. Analiza e sigurisë dhe kufizimet
 
@@ -307,42 +354,3 @@ Kriteret kryesore të pranimit janë:
 - **Pagesa:** statusi `Paid` është deklarim i klientit në kontratë. Projekti nuk kryen pagesa bankare dhe nuk transferon tokena.
 - **Varësitë:** kontrolli `npm audit --omit=dev` ka raportuar zero dobësi në varësitë e runtime-it. Auditimi i plotë mund të raportojë këshillime për paketat e zhvillimit; përpara përdorimit në prodhim nevojitet vlerësim dhe përditësim i toolchain-it.
 
-## 10. Udhëzime për demonstrimin akademik
-
-Demonstrimi duhet të përfshijë së paku tri rrjedha të plota:
-
-1. Regjistrimi dhe dërgimi i një fature nga biznesi, pastaj pranimi nga klienti.
-2. Kontestimi i një fature nga klienti dhe paraqitja e historikut të saj.
-3. Verifikimi i një PDF-je origjinale dhe i një kopjeje të ndryshuar.
-
-Videoja 8–10 minuta duhet të paraqesë gjithashtu lidhjen me MetaMask, një transaksion në Sepolia, përdorimin e API-së ose shërbimit off-chain, arkitekturën e zgjidhjes dhe kontributin e secilit anëtar. Çdo anëtar duhet të shpjegojë një rrjedhë që ka implementuar dhe të jetë në gjendje të arsyetojë vendimet teknike.
-
-Për dëshmi të kontributit individual, detyrat duhet të ndahen në Issues, puna të bëhet në branches të identifikueshme dhe integrimi të dokumentohet me Pull Requests. Deklarata individuale duhet të përmbajë lidhjet përkatëse, skedarët, testet dhe pjesën e realizuar.
-
-## 11. Komandat kryesore
-
-| Komanda | Funksioni |
-|---|---|
-| `npm install` | Instalimi i varësive të projektit. |
-| `npm run compile` | Kompilimi i kontratave Solidity. |
-| `npm test` | Ekzekutimi i testeve automatike. |
-| `npm run node` | Nisja e blockchain-it lokal Hardhat. |
-| `npm run deploy:local` | Deploy-i i kontratave në rrjetin lokal. |
-| `npm run demo:seed -- --network localhost` | Regjistrimi i të dhënave sintetike të demonstrimit. |
-| `npm run backend:dev` | Nisja e API-së dhe indeksuesit lokal. |
-| `npm run frontend:dev` | Nisja e ndërfaqes së përdoruesit. |
-| `npm run deploy:sepolia` | Deploy-i testues në Sepolia pas konfigurimit të mjedisit. |
-
-## 12. Gjendja e dorëzimit
-
-| Përbërësi | Gjendja |
-|---|---|
-| Kontratat dhe procesi i faturës | Implementuar dhe testuar lokalisht. |
-| Ndërfaqja me pesë pamje dhe MetaMask | Implementuar; provat e transaksioneve kërkojnë llogari/rrjet të konfiguruar. |
-| API dhe indeksimi i eventeve | Implementuar për demonstrim; indeksi ruhet në memorie. |
-| Testet automatike | 32 teste të kontratave kalojnë lokalisht. |
-| Shembujt demonstrues | Pesë fatura dhe PDF sintetike krijohen në rrjetin lokal. |
-| Deploy-i dhe transaksioni në Sepolia | Kërkojnë RPC URL dhe Sepolia ETH; duhen kryer e dokumentuar nga ekipi. |
-| Ngarkimi i PDF-ve dhe metadata-s në Pinata/IPFS | Implementuar për regjistrimin nga frontend-i; kërkon `PINATA_JWT` në backend dhe përdorim me dokumente testuese. |
-| Repository, Issues/PR dhe dëshmitë e ekipit | Plotësohen nga ekipi. |
-| Videoja dhe mbrojtja individuale | Përgatiten dhe realizohen nga ekipi. |
